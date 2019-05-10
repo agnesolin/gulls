@@ -19,26 +19,16 @@ library(lubridate)
 
 # this opens a window allowing you to choose a directory where the input files are located (and where the output files will be stored)
 setwd(selectDirectory())
-setwd("C:/Users/Ruedi/Dropbox/RESEARCH/Projects/Pathtrack/Trackingfiles") #laptop
-setwd("C:/Users/rn6f/Dropbox/RESEARCH/Projects/Pathtrack/Trackingfiles") #desktop
-
 
 # select which colony to use (the other ones should be hashed out)
-# this also sets the co-ordinates of the colony (need to extra-check these co-ordinates)
-# colony <- "Islay";         C_lat <- 55.79516; C_long <- -6.480308
-colony <- "LadyIsle";      C_lat <- 55.52724; C_long <- -4.73453
-# colony <- "Oronsay";       C_lat <- 56.06184; C_long <- -6.197005
-# colony <- "Pladda";        C_lat <- 55.42785; C_long <- -5.11883
+# colony <- "Islay";         
+colony <- "LadyIsle";      
+# colony <- "Oronsay";    
+# colony <- "Pladda";        
 
-# there are two locations on Oronsay
-# for all but 12703
-colony <- "Oronsay";      C_lat <- 56.0255; C_long <- -6.2155
-# for 12703
-# colony <- "Oronsay";      C_lat <- 56.016; C_long <- -6.27
 
 # import data (the data file imported depends on which colony you have chosen)
 gulls <- read.csv(paste0(colony, "AllNo0.csv"), header = T)
-
 
 # create a proper date/time column
 gulls$date_time <- as.POSIXct(paste(paste0(20,gulls$Year), gulls$Month, gulls$Day, gulls$Hour, gulls$Minute, gulls$Second), 
@@ -178,10 +168,17 @@ par(mar=c(5.1, 4.1, 4.1, 2.1))
 
 #### calculate distance to colony for each fix and time interval between fixes ####
 
-# create spatial object and calculate distance to colony (from prevs script)
+# add nest-coordinates
+nest_coordinates <- read.csv("nest_coordinates.csv", header = T, sep = ";")
+
+# create spatial object for all recorded locations
 locs = SpatialPoints(coords = cbind(gulls$Long, gulls$Lat), proj4string=CRS("+proj=longlat +datum=WGS84"))
-C = SpatialPoints(coords = cbind(C_long, C_lat), proj4string=CRS("+proj=longlat +datum=WGS84"))
-gulls$distance = spDistsN1(locs, C, longlat = T) # calculates distance from colony in km
+
+# calculate distance for each recording to individual-specific nest coordinates
+for(i in 1:length(unique(gulls$Bird))){
+  C = SpatialPoints(coords = cbind(nest_coordinates$nest_long[nest_coordinates$Bird == unique(gulls$Bird)[i]], nest_coordinates$nest_lat[nest_coordinates$Bird == unique(gulls$Bird)[i]]), proj4string=CRS("+proj=longlat +datum=WGS84"))
+  gulls$distance[gulls$Bird == unique(gulls$Bird)[i]] = spDistsN1(locs[gulls$Bird == unique(gulls$Bird)[i]], C, longlat = T) # calculates distance from colony in km
+}
 
 
 # calculate time intervals between fixes in seconds (this will be inaccurate for first record of each bird - deal with this later)
