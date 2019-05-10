@@ -21,10 +21,10 @@ library(lubridate)
 setwd(selectDirectory())
 
 # select which colony to use (the other ones should be hashed out)
-# colony <- "Islay";         
-colony <- "LadyIsle";      
-# colony <- "Oronsay";    
-# colony <- "Pladda";        
+#colony <- "Islay";         
+#colony <- "LadyIsle";      
+colony <- "Oronsay";    
+#colony <- "Pladda";        
 
 
 # import data (the data file imported depends on which colony you have chosen)
@@ -44,13 +44,16 @@ str(gulls)
 
 buffer <- 0.3 # this is where you set the size of the buffer you want around the colony co-ordinates (if outside buffer == trip)
 
-min_res <- 31 # this is the time interval needed for all fixes in a trip (e.g. avg time back at colony) - otherwise whole trip is discarded
-min_res_nest <- 31 # this is the time interval needed in order for nest attendance to be calculated (if resolution is too low, no nest attendance lengths are calculated)
+
+# min_res is the time interval needed for all fixes in a trip (e.g. avg time back at colony) - otherwise whole trip is discarded
+# min_res_nest is the time interval needed in order for nest attendance to be calculated (if resolution is too low, no nest attendance lengths are calculated)
+# Islay trips more frequent so have diff resolution
+if(colony == "Islay") {min_res <- 11; min_res_nest <- 11} else {min_res <- 31; min_res_nest <- 31}
+
 
 # this is to set time period you are interested in (can use finer cut-off points)
-min_month <- 4
-max_month <- 7
-
+min_month <- 4 # April
+max_month <- 7 # July
 
 
 #### plot unfiltered data ####
@@ -70,17 +73,22 @@ points(gulls$Long, gulls$Lat, # plots each location
 # remove points recorded at equator
 gulls <- gulls[gulls$Lat > 50,]
 
-# Oronsay, Black Isle (Bird 12703)
-# only if Bird ID 12703 from Oronsay is run
-# gulls <- gulls[gulls$Bird == 12703,]
-
-# Oronsay, Carn (all other Birds)
-gulls <- gulls[gulls$Bird != 12703,]
+# selecting only breeding season (April to July)
+gulls <- gulls[gulls$Month >= min_month & gulls$Month <= max_month,]
 
 # remove odd locations from Lady Isle and Oronsay (ideally we want to come up with a rule for how these are removed)
 if(colony == "LadyIsle") gulls <- gulls[gulls$Lat < 56,]; gulls <- gulls[gulls$Long < -3,]
 if(colony == "Oronsay") gulls <- gulls[gulls$Lat < 57,]; gulls <- gulls[gulls$Long > -8,]
 
+
+# plot filtered data
+newmap <- getMap(resolution = "low")
+plot(newmap, xlim = c(floor(min(gulls$Long)), ceiling(max(gulls$Long))), ylim = c(floor(min(gulls$Lat)), ceiling(max(gulls$Lat))), 
+     xlab = "Recorded Locations")
+
+points(gulls$Long, gulls$Lat, # plots each location
+       cex = 1, # adjust size of points
+       pch = 19) # adjust type of point
 
 
 #### initial plotting ####
@@ -111,8 +119,6 @@ legend("right",
        xpd = T,
        title = "No Satellites")
 
-# selecting only breeding season (April to July)
-gulls <- gulls[gulls$Month > 3 & gulls$Month < 8,]
 
 # separate colours by bird id
 newmap <- getMap(resolution = "high")
@@ -165,7 +171,6 @@ par(mar=c(5.1, 4.1, 4.1, 2.1))
 
 
 
-
 #### calculate distance to colony for each fix and time interval between fixes ####
 
 # add nest-coordinates
@@ -185,9 +190,9 @@ for(i in 1:length(unique(gulls$Bird))){
 gulls$interval = c(NA, difftime(gulls$date_time[2:length(gulls$date_time)], gulls$date_time[1:length(gulls$date_time)-1])) # NA first because no previous recordings (can't calculate interval)
 
 
-# there are some odd duplicates in the data - might want to look into that
-gulls <- gulls[!duplicated(gulls[c("Bird", "date_time")]),] # removes duplicates based on bird id and date_time
-
+# removes duplicates based on bird id and date_time - keeps the one with the highest accuracy
+gulls <- gulls[order(gulls$Bird, gulls$date_time, gulls$Accuracy),]
+gulls <- gulls[!duplicated(gulls[c("Bird", "date_time")]),]
 
 
 #### define trips and calculate characteristics separately for each bird ####
@@ -350,13 +355,11 @@ for(b in 1:length(birds)) { # this loops through all the individuals birds so th
 trips <- trips[!is.na(month(trips$start_time)) & month(trips$start_time) >= min_month & month(trips$end_time) <= max_month,]
 
 
-
 #### checking values ####
 summary(trips) 
 min(trips$trip_duration) 
 max(trips$trip_duration) 
-table(gulls$interval)
-table(trips$nest_attendance)
+
 
 #### saving csv file of trips and of all recordings merged with trip charachterstics and includes colony name
 write.csv(trips, paste0("trips_", colony, ".csv")) # this saves the file in the same directory 
