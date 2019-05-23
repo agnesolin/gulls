@@ -10,173 +10,132 @@ rm(list=ls())
 
 # load libraries
 library(suncalc)
+library(rstudioapi)
 
 # this opens a window allowing you to choose a directory where the input files are located (and where the output files will be stored)
 setwd(selectDirectory())
 
 # import all data
-Islay <- read.csv("all_info_Islay.csv")
-Oronsay <- read.csv("all_info_Oronsay.csv")
-LadyIsle <- read.csv("all_info_LadyIsle.csv")
-Pladda <- read.csv("all_info_Pladda.csv")
-
+Islay = read.csv("all_info_Islay.csv")
+Oronsay = read.csv("all_info_Oronsay.csv")
+LadyIsle = read.csv("all_info_LadyIsle.csv")
+Pladda = read.csv("all_info_Pladda.csv")
 
 # add nest coordinates
-nest_coordinates <- read.csv("nest_coordinates.csv", sep = ";")
-
-Islay <- merge(Islay, nest_coordinates, all.x = T, all.y = F, by = c("Colony", "Bird"))
-Oronsay <- merge(Oronsay, nest_coordinates, all.x = T, all.y = F, by = c("Colony", "Bird"))
-LadyIsle <- merge(LadyIsle, nest_coordinates, all.x = T, all.y = F, by = c("Colony", "Bird"))
-Pladda <- merge(Pladda, nest_coordinates, all.x = T, all.y = F, by = c("Colony", "Bird"))
+nest_coordinates = read.csv("nest_coordinates.csv", sep = ";")
 
 
-# add times of dusk (end of civil twilight in the evening) and dawn (start of civil twilight in the morning)
-twilight_Islay = data.frame(date = as.Date(Islay$date_time),
-                            lat = Islay$nest_lat,
-                            lon = Islay$nest_long)
-twilight_Oronsay = data.frame(date = as.Date(Oronsay$date_time),
-                            lat = Oronsay$nest_lat,
-                            lon = Oronsay$nest_long)
-twilight_LadyIsle = data.frame(date = as.Date(LadyIsle$date_time),
-                            lat = LadyIsle$nest_lat,
-                            lon = LadyIsle$nest_long)
-twilight_Pladda = data.frame(date = as.Date(Pladda$date_time),
-                            lat = Pladda$nest_lat,
-                            lon = Pladda$nest_long)
+colonies = c("Islay", "Oronsay", "LadyIsle", "Pladda")
 
-Islay[,40:41] <- getSunlightTimes(data = twilight_Islay, keep=c("dawn", "dusk"), tz="UTC")[,4:5]
-Oronsay[,40:41] <- getSunlightTimes(data = twilight_Oronsay, keep=c("dawn", "dusk"), tz="UTC")[,4:5]
-LadyIsle[,40:41] <- getSunlightTimes(data = twilight_LadyIsle, keep=c("dawn", "dusk"), tz="UTC")[,4:5]
-Pladda[,40:41] <- getSunlightTimes(data = twilight_Pladda, keep=c("dawn", "dusk"), tz="UTC")[,4:5]
+for(i in 1:length(colonies)){
+  
+  # this assigns the content of the individual colony dataframes to a dataframe called "data"
+  # data gets re-assigned in each loop
+  if(colonies[i] == "Islay") data = Islay        # loop round 1
+  if(colonies[i] == "Oronsay") data = Oronsay    # loop round 2
+  if(colonies[i] == "LadyIsle") data = LadyIsle  # loop round 3
+  if(colonies[i] == "Pladda") data = Pladda      # loop round 4
+  
+  
+  ### sorting out what is day and what is night ###
+  
+  # this merges the colony data with the nest co-ordinates by colony and bird id
+  data = merge(data, nest_coordinates, all.x = T, all.y = F, by = c("Colony", "Bird"))
+  
+  # this makes a dataframe to use when calculating twilight times
+  twilight = data.frame(date = as.Date(data$date_time), # current date
+                              lat = data$nest_lat,      # latitude of nest
+                              lon = data$nest_long)     # longitude of nest
+  
+  # this creates two new columns with the time of dawn and dusk based on the location and date
+  data[,40:41] = getSunlightTimes(data = twilight, keep=c("dawn", "dusk"), tz="UTC")[,4:5]
+  
+  # here we make a new date column where whole night period get same date as previous day
+  data$date_time = as.POSIXlt(data$date_time, tz = "UTC") # fixing format
+  data$new_date = # first new column gets same value as the standard date column
+    as.Date(data$date_time) 
+  data$new_date[data$date_time < data$dawn] = # if before dawn, it gets assigned the date of the previous day
+    data$new_date[data$date_time < data$dawn]-1
+  
+  # add night and day column
+  data$day_night = 
+    "night" # first gets assigned the value "night"
+  data$day_night[data$date_time > data$dawn & data$date_time < data$dusk] = 
+    "day" # if after dawn and before dusk it gets assigned "day"
+  
+  
+  
+  ### calculating trip frequencies
+  
+  # adding column defining whether resolution is sufficient (1 = good enough)
+  data$res = 0
+  if(colonies[i] == "Islay") data$res[data$interval< 11*60] = 1 # 11 min for Islay
+  if(colonies[i] != "Islay") data$res[data$interval< 31*60] = 1 # 31 min for other colonies
+  
+  # adding column defining whether a trip was initialised at this time point (1 trip was initialised)
+  data$init = 0
+  data$init[
+    !duplicated(data$trip_id) # equal to 1 if it is the first time a trip id appears (ie when trip was initialised)
+    & !is.na(data$trip_id)] = 1
+  
+  
+  # creating data frame with number of initalised trips day/night per date, and the total amount of time when resolution was high enough
+  
+  # here we sum the number of trips initialised where resolution was high enough by bird id, date and day/night
+  freqs = aggregate(data$init[data$res == 1], 
+                    by = list(data$day_night[data$res == 1], data$new_date[data$res == 1],  data$Bird[data$res == 1]), 
+                    FUN = sum)
+  freqs = freqs[,c(3,2,1,4)] # making order more logical
+  
+  # giving it more sensible names
+  names(freqs) = c("bird_id", "new_date", "day_night", "init_trips")
+  
+  # here we sum all sampling intervals where resolution was high enough by bird id, date and day/night = total sampling time
+  freqs$sampling_time = aggregate(data$interval[data$res == 1], 
+                                  by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$Bird[data$res == 1]), 
+                                  FUN = sum)$x # x just means that we only want the final column of the dataframe that aggregate produces
+  
 
+  # trip frequencies calculated as number of initalised trips per day/night per date divided by corresponding sampling time (converted to hours)
+  freqs$trip_freq = freqs$init_trips/(freqs$sampling_time/60/60)
+ 
+   
+  
+  ### adding average max distance and average trip length for each bird id, date and day/night combo ###
+  
+  data_dists = aggregate(data$max_dist[data$res == 1] , 
+                         by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$bird_id[data$res == 1]), 
+                         FUN = mean)
+  data_duration = aggregate(data$trip_duration[data$res == 1], 
+                            by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$bird_id[data$res == 1]), 
+                            FUN = mean)
+  
+  names(data_dists) = c("day_night", "new_date", "bird_id", "avg_max_dist")
+  names(data_duration) = c("day_night", "new_date", "bird_id", "avg_duration")
+  
+  data_dists = data_dists[!is.na(data_dists$avg_max_dist),]; data_duration = data_duration[!is.na(data_duration$avg_duration),]
+  
+  data_daynight = merge(freqs, data_dists, by = c("day_night", "new_date", "bird_id"), all = T)
+  data_daynight = merge(data_daynight, data_duration, by = c("day_night", "new_date", "bird_id"), all = T)
+  
+  data_daynight = data_daynight[order(data_daynight$bird_id, data_daynight$new_date),]
+  
+  data_daynight$trip_freq[is.infinite(data_daynight$trip_freq)] = NA
+  data_daynight$trip_freq[is.nan(data_daynight$trip_freq)] = NA
+  
+  # save as csv files
+  write.csv(data_daynight, paste0(colonies[i],"_DayNight.csv"))
 
-
-# make new date column where whole night period get same date as previous day
-Islay$date_time <- as.POSIXlt(Islay$date_time, tz = "UTC") 
-Islay$new_date <- as.Date(Islay$date_time) 
-Islay$new_date[Islay$date_time < Islay$dawn] = Islay$new_date[Islay$date_time < Islay$dawn]-1
-
-Oronsay$date_time <- as.POSIXlt(Oronsay$date_time, tz = "UTC") 
-Oronsay$new_date <- as.Date(Oronsay$date_time) 
-Oronsay$new_date[Oronsay$date_time < Oronsay$dawn] = Oronsay$new_date[Oronsay$date_time < Oronsay$dawn]-1
-
-LadyIsle$date_time <- as.POSIXlt(LadyIsle$date_time, tz = "UTC") 
-LadyIsle$new_date <- as.Date(LadyIsle$date_time) 
-LadyIsle$new_date[LadyIsle$date_time < LadyIsle$dawn] = LadyIsle$new_date[LadyIsle$date_time < LadyIsle$dawn]-1
-
-Pladda$date_time <- as.POSIXlt(Pladda$date_time, tz = "UTC") 
-Pladda$new_date <- as.Date(Pladda$date_time) 
-Pladda$new_date[Pladda$date_time < Pladda$dawn] = Pladda$new_date[Pladda$date_time < Pladda$dawn]-1
-
-
-# add night and day columns
-Islay$day_night = "night"
-Islay$day_night[Islay$date_time > Islay$dawn & Islay$date_time < Islay$dusk] = "day"
-
-Oronsay$day_night = "night"
-Oronsay$day_night[Oronsay$date_time > Oronsay$dawn & Oronsay$date_time < Oronsay$dusk] = "day"
-
-LadyIsle$day_night = "night"
-LadyIsle$day_night[LadyIsle$date_time > LadyIsle$dawn & LadyIsle$date_time < LadyIsle$dusk] = "day"
-
-Pladda$day_night = "night"
-Pladda$day_night[Pladda$date_time > Pladda$dawn & Pladda$date_time < Pladda$dusk] = "day"
-
-
-# adding column defining whether resolution is sufficient (1 = good enough)
-Islay$res = 0
-Islay$res[Islay$interval< 11*60] = 1 # 11 min for Islay
-
-Oronsay$res = 0
-Oronsay$res[Oronsay$interval< 31*60] = 1 # 31 min
-
-LadyIsle$res = 0
-LadyIsle$res[LadyIsle$interval< 31*60] = 1 # 31 min
-
-Pladda$res = 0
-Pladda$res[Pladda$interval< 31*60] = 1 # 31 min
-
-
-# adding column defining whether a trip was initialised at this time point (1 trip was initialised)
-Islay$init = 0
-Islay$init[!duplicated(Islay$trip_id) & !is.na(Islay$trip_id)] = 1
-
-Oronsay$init = 0
-Oronsay$init[!duplicated(Oronsay$trip_id) & !is.na(Oronsay$trip_id)] = 1
-
-LadyIsle$init = 0
-LadyIsle$init[!duplicated(LadyIsle$trip_id) & !is.na(LadyIsle$trip_id)] = 1
-
-Pladda$init = 0
-Pladda$init[!duplicated(Pladda$trip_id) & !is.na(Pladda$trip_id)] = 1
-
-
-# creating data frame with number of initalised trips day/night per date, and the total amount of time when resolution was high enough
-Islay_freqs = data.frame(new_date = aggregate(Islay$init, by = list(Islay$day_night, Islay$new_date), FUN = sum)$Group.2,
-                         day_night = aggregate(Islay$init, by = list(Islay$day_night, Islay$new_date), FUN = sum)$Group.1,
-                         init_trips = aggregate(Islay$init, by = list(Islay$day_night, Islay$new_date), FUN = sum)$x,
-                         sampling_time = aggregate(Islay$res, by = list(Islay$day_night, Islay$new_date), FUN = sum)$x*10) # fixes every 10 min for Islay
-
-Oronsay_freqs = data.frame(new_date = aggregate(Oronsay$init, by = list(Oronsay$day_night, Oronsay$new_date), FUN = sum)$Group.2,
-                           day_night = aggregate(Oronsay$init, by = list(Oronsay$day_night, Oronsay$new_date), FUN = sum)$Group.1,
-                         init_trips = aggregate(Oronsay$init, by = list(Oronsay$day_night, Oronsay$new_date), FUN = sum)$x,
-                         sampling_time = aggregate(Oronsay$res, by = list(Oronsay$day_night, Oronsay$new_date), FUN = sum)$x*30) # fixes every 10 min
-
-LadyIsle_freqs = data.frame(new_date = aggregate(LadyIsle$init, by = list(LadyIsle$day_night, LadyIsle$new_date), FUN = sum)$Group.2,
-                            day_night = aggregate(LadyIsle$init, by = list(LadyIsle$day_night, LadyIsle$new_date), FUN = sum)$Group.1,
-                         init_trips = aggregate(LadyIsle$init, by = list(LadyIsle$day_night, LadyIsle$new_date), FUN = sum)$x,
-                         sampling_time = aggregate(LadyIsle$res, by = list(LadyIsle$day_night, LadyIsle$new_date), FUN = sum)$x*30) # fixes every 10 min
-
-Pladda_freqs = data.frame(new_date = aggregate(Pladda$init, by = list(Pladda$day_night, Pladda$new_date), FUN = sum)$Group.2,
-                          day_night = aggregate(Pladda$init, by = list(Pladda$day_night, Pladda$new_date), FUN = sum)$Group.1,
-                         init_trips = aggregate(Pladda$init, by = list(Pladda$day_night, Pladda$new_date), FUN = sum)$x,
-                         sampling_time = aggregate(Pladda$res, by = list(Pladda$day_night, Pladda$new_date), FUN = sum)$x*30) # fixes every 10 min
-
-
-# trip frequencies calculated as number of initalised trips per day/night per date over corresponding sampling time (in hours)
-Islay_freqs$trip_freq = Islay_freqs$init_trips/(Islay_freqs$sampling_time/60)
-Oronsay_freqs$trip_freq = Oronsay_freqs$init_trips/(Oronsay_freqs$sampling_time/60)
-LadyIsle_freqs$trip_freq = LadyIsle_freqs$init_trips/(LadyIsle_freqs$sampling_time/60)
-Pladda_freqs$trip_freq = Pladda_freqs$init_trips/(Pladda_freqs$sampling_time/60)
-
-# filter out estimates with short sampling times
-min_sampling_time = 60*3
-
-Islay_freqs = Islay_freqs[Islay_freqs$sampling_time > min_sampling_time,]
-Oronsay_freqs = Oronsay_freqs[Oronsay_freqs$sampling_time > min_sampling_time,]
-LadyIsle_freqs = LadyIsle_freqs[LadyIsle_freqs$sampling_time > min_sampling_time,]
-Pladda_freqs = Pladda_freqs[Pladda_freqs$sampling_time > min_sampling_time,]
+  
+  # this code merges it all back together in case you want to link it with some other information
+  # data = merge(data, freqs, 
+  #              all.x = T, all.y = F,
+  #              by = c("new_date","day_night", "bird_id"))
+  # 
+  
+  }
 
 
-# plot of freq against day/night
-plot(Islay_freqs$day_night, Islay_freqs$trip_freq)
-plot(Oronsay_freqs$day_night, Oronsay_freqs$trip_freq)
-plot(LadyIsle_freqs$day_night, LadyIsle_freqs$trip_freq)
-plot(Pladda_freqs$day_night, Pladda_freqs$trip_freq)
 
-
-# merge all back together
-Islay = merge(Islay, Islay_freqs[,c(1,2,5)], 
-              all.x = T, all.y = F,
-              by = c("new_date","day_night"))
-
-Oronsay = merge(Oronsay, Oronsay_freqs[,c(1,2,5)], 
-              all.x = T, all.y = F,
-              by = c("new_date","day_night"))
-
-LadyIsle = merge(LadyIsle, LadyIsle_freqs[,c(1,2,5)], 
-                all.x = T, all.y = F,
-                by = c("new_date","day_night"))
-
-Pladda = merge(Pladda, Pladda_freqs[,c(1,2,5)], 
-                all.x = T, all.y = F,
-                by = c("new_date","day_night"))
-
-
-# save as csv files
-write.csv(Islay, "Islay_DayNightFreq.csv")
-write.csv(Oronsay, "Oronsay_DayNightFreq.csv")
-write.csv(LadyIsle, "LadyIsle_DayNightFreq.csv")
-write.csv(Pladda, "Pladda_DayNightFreq.csv")
 
 
