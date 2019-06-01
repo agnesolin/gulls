@@ -81,33 +81,43 @@ for(i in 1:length(colonies)){
   
   # creating data frame with number of initalised trips day/night per date, and the total amount of time when resolution was high enough
   
+  # creating a column that can be used to filter out samples just post dusk/dawn
+  data$straddle = 0
+  for(j in 1:(nrow(data)-1)){ 
+    if(data$day_night[j] == "day" & data$day_night[j+1] == "night")  data$straddle[j+1] = 1 
+    if(data$day_night[j] == "night" & data$day_night[j+1] == "day")  data$straddle[j+1] = 1 
+  }
+  
+  
   # here we sum the number of trips initialised where resolution was high enough by bird id, date and day/night
-  freqs = aggregate(data$init[data$res == 1], 
-                    by = list(data$day_night[data$res == 1], data$new_date[data$res == 1],  data$Bird[data$res == 1]), 
+  freqs = aggregate(data$init[data$res == 1 & data$straddle == 0], 
+                    by = list(data$day_night[data$res == 1 & data$straddle == 0], data$new_date[data$res == 1 & data$straddle == 0],  data$Bird[data$res == 1 & data$straddle == 0]), 
                     FUN = sum)
   freqs = freqs[,c(3,2,1,4)] # making order more logical
   
   # giving it more sensible names
   names(freqs) = c("bird_id", "new_date", "day_night", "init_trips")
   
+
   # here we sum all sampling intervals where resolution was high enough by bird id, date and day/night = total sampling time
-  freqs$sampling_time = aggregate(data$interval[data$res == 1], 
-                                  by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$Bird[data$res == 1]), 
+    freqs$sampling_time = aggregate(data$interval[data$res == 1 & data$straddle == 0], 
+                                  by = list(data$day_night[data$res == 1 & data$straddle == 0], data$new_date[data$res == 1 & data$straddle == 0], data$Bird[data$res == 1 & data$straddle == 0]), 
                                   FUN = sum)$x # x just means that we only want the final column of the dataframe that aggregate produces
+  
   
 
   # trip frequencies calculated as number of initalised trips per day/night per date divided by corresponding sampling time (converted to hours)
   freqs$trip_freq = freqs$init_trips/(freqs$sampling_time/60/60)
  
-   
+  
   
   ### adding average max distance and average trip length for each bird id, date and day/night combo ###
   
-  data_dists = aggregate(data$max_dist[data$res == 1] , 
-                         by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$bird_id[data$res == 1]), 
+  data_dists = aggregate(data$max_dist[data$res == 1 & data$straddle == 0] , 
+                         by = list(data$day_night[data$res == 1 & data$straddle == 0], data$new_date[data$res == 1 & data$straddle == 0], data$bird_id[data$res == 1 & data$straddle == 0]), 
                          FUN = mean)
-  data_duration = aggregate(data$trip_duration[data$res == 1], 
-                            by = list(data$day_night[data$res == 1], data$new_date[data$res == 1], data$bird_id[data$res == 1]), 
+  data_duration = aggregate(data$trip_duration[data$res == 1 & data$straddle == 0], 
+                            by = list(data$day_night[data$res == 1 & data$straddle == 0], data$new_date[data$res == 1 & data$straddle == 0], data$bird_id[data$res == 1 & data$straddle == 0]), 
                             FUN = mean)
   
   names(data_dists) = c("day_night", "new_date", "bird_id", "avg_max_dist")
